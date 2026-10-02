@@ -2,7 +2,7 @@ symbol: BTCUSDT
 category: linear
 history_days: 90
 interval: 1m
-min_confidence: 0.85
+min_confidence: 0.90
 min_edge_over_50: 0.10
 max_signal_age_seconds: 75
 cooldown_minutes: 1
@@ -10,11 +10,18 @@ webhook_url: ""
 
 # Telegram alerts. Never commit a real bot token to a public repository.
 telegram:
-  enabled: false
-  bot_token: "8847937536:AAHA4xlbf9yzBw5XDH1HDsHgxvLhMpcIhd0"
-  chat_id: "8977957511"
+  enabled: true
+  bot_token: " "
+  chat_id: ""
   send_no_trade: false
-  send_every_5m: true
+  send_every_5m: false
+  send_every_prediction: true
+ollama:
+  enabled: false
+  base_url: http://localhost:11434
+  model: qwen2.5:3b
+  timeout_seconds: 10
+
 timezone: Asia/Kolkata
 model_dir: models
 data_dir: data

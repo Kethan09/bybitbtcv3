@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+from html import escape
 import json
+import os
 import time
 from pathlib import Path
 
@@ -43,7 +45,10 @@ class BybitBTCProbabilityBot:
         )
 
         self.telegram_token = str(
-            telegram.get("bot_token", "")
+            os.getenv(
+                "TELEGRAM_BOT_TOKEN",
+                telegram.get("bot_token", "")
+            )
         ).strip()
 
         self.telegram_chat_id = str(
@@ -55,6 +60,34 @@ class BybitBTCProbabilityBot:
                 "send_every_5m",
                 True
             )
+        )
+
+        self.telegram_every_prediction = bool(
+            telegram.get(
+                "send_every_prediction",
+                False
+            )
+        )
+
+        # ==================================================
+        # OLLAMA
+        # ==================================================
+
+        ollama = cfg.get("ollama", {}) or {}
+        self.ollama_enabled = bool(
+            ollama.get("enabled", False)
+        )
+        self.ollama_url = str(
+            ollama.get(
+                "base_url",
+                "http://localhost:11434"
+            )
+        ).rstrip("/")
+        self.ollama_model = str(
+            ollama.get("model", "qwen2.5:3b")
+        ).strip()
+        self.ollama_timeout = float(
+            ollama.get("timeout_seconds", 10)
         )
 
         # ==================================================
@@ -833,6 +866,13 @@ class BybitBTCProbabilityBot:
 
             return
 
+        if ":" not in self.telegram_token:
+            print(
+                "⚠️ Telegram bot token must include the bot ID and "
+                "secret, separated by a colon."
+            )
+            return
+
         url = (
             "https://api.telegram.org/"
             f"bot{self.telegram_token}/"
@@ -854,17 +894,17 @@ class BybitBTCProbabilityBot:
                 timeout=10
             )
 
-            response.raise_for_status()
+            try:
+                result = response.json()
+            except ValueError:
+                result = {
+                    "description": response.text
+                }
 
-            result = response.json()
-
-            if not result.get(
-                "ok",
-                False
-            ):
+            if not response.ok or not result.get("ok", False):
                 print(
-                    "Telegram API error:",
-                    result
+                    f"Telegram API error ({response.status_code}): "
+                    f"{result.get('description', 'Unknown error')}"
                 )
                 return
 
@@ -875,8 +915,8 @@ class BybitBTCProbabilityBot:
         except requests.RequestException as exc:
 
             print(
-                f"⚠️ Telegram error: "
-                f"{exc}"
+                "⚠️ Telegram connection error: "
+                f"{type(exc).__name__}"
             )
 
     # ======================================================
@@ -1004,11 +1044,68 @@ class BybitBTCProbabilityBot:
             f"PAPER / prediction only\n\n"
 
             f"5M filter: "
-            f"{'; '.join(reason5[:2])}\n"
+            f"{'; '.join(escape(reason) for reason in reason5[:2])}\n"
 
             f"15M filter: "
-            f"{'; '.join(reason15[:2])}"
+            f"{'; '.join(escape(reason) for reason in reason15[:2])}"
         )
+
+    def generate_ai_commentary(
+        self,
+        p5: float,
+        p15: float,
+        action5: str,
+        action15: str,
+        reason5: list[str],
+        reason15: list[str]
+    ) -> str:
+
+        if not self.ollama_enabled:
+            return ""
+
+        prompt = (
+            "Explain these model outputs in at most two short sentences. "
+            "Use only the supplied values. Do not make new predictions, "
+            "claim certainty, or recommend a trade. State that this is "
+            "model context, not financial advice. Return plain text only.\n"
+            f"5-minute UP probability: {p5 * 100:.2f}%; "
+            f"decision: {action5}; filters: {'; '.join(reason5[:2])}.\n"
+            f"15-minute UP probability: {p15 * 100:.2f}%; "
+            f"decision: {action15}; filters: {'; '.join(reason15[:2])}."
+        )
+
+        try:
+            response = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "num_predict": 120,
+                    },
+                },
+                timeout=self.ollama_timeout
+            )
+            response.raise_for_status()
+            result = response.json()
+
+        except (requests.RequestException, ValueError) as exc:
+            print(
+                "⚠️ Ollama unavailable; sending without AI context "
+                f"({type(exc).__name__})."
+            )
+            return ""
+
+        if not isinstance(result, dict):
+            return ""
+
+        commentary = result.get("response", "")
+        if not isinstance(commentary, str):
+            return ""
+
+        return commentary.strip()[:500]
 
     # ======================================================
     # RUN PREDICTION
@@ -1201,15 +1298,18 @@ class BybitBTCProbabilityBot:
             )
 
         # ==================================================
-        # TELEGRAM EVERY 5 MINUTES
+        # TELEGRAM PREDICTION UPDATES
         # ==================================================
 
         if (
             self.telegram_enabled
-            and
-            self.telegram_every_5m
-            and
-            timestamp.minute % 5 == 0
+            and (
+                self.telegram_every_prediction
+                or (
+                    self.telegram_every_5m
+                    and timestamp.minute % 5 == 0
+                )
+            )
             and
             self.last_telegram_minute
             != timestamp
@@ -1230,6 +1330,21 @@ class BybitBTCProbabilityBot:
                     reason15
                 )
             )
+
+            commentary = self.generate_ai_commentary(
+                p5,
+                p15,
+                action5,
+                action15,
+                reason5,
+                reason15
+            )
+
+            if commentary:
+                message += (
+                    "\n\n🤖 <b>AI context (not a signal):</b>\n"
+                    f"{escape(commentary)}"
+                )
 
             self.send_telegram(
                 message

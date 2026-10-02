@@ -97,6 +97,7 @@ def make_features(df: pd.DataFrame) -> pd.DataFrame:
 
     for rule, prefix in (("5min", "m5"), ("15min", "m15")):
         b = _resample(x[["open", "high", "low", "close", "volume"]], rule)
+        b.index = b.index + pd.Timedelta(rule) - pd.Timedelta(minutes=1)
         bc = b["close"]
         ema20 = bc.ewm(span=20, adjust=False, min_periods=20).mean()
         ema50 = bc.ewm(span=50, adjust=False, min_periods=50).mean()

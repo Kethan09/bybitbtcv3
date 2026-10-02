@@ -35,19 +35,54 @@ In the JSON response, find:
 
 That number is your `chat_id`.
 
-## 4. Put the values into `config.yaml`
+## 4. Configure the chat ID and token
 
 ```yaml
 telegram:
   enabled: true
-  bot_token: "YOUR_BOT_TOKEN"
+  bot_token: ""
   chat_id: "123456789"
   send_no_trade: false
 ```
 
+Set the newly rotated token in PowerShell before starting the bot:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "YOUR_NEW_BOT_TOKEN"
+python live_bot.py
+```
+
+The token must include the complete BotFather value, including the bot ID,
+colon, and secret. The environment variable applies only to the current
+PowerShell session.
+
 For a private Telegram chat, the ID is normally a positive integer. For a group/channel it can have a different format.
 
-## 5. Run the bot
+## 5. Optional local AI commentary
+
+Install Ollama for Windows, then download a small local model:
+
+```powershell
+ollama pull qwen2.5:3b
+```
+
+Enable the commentary in `config.yaml`:
+
+```yaml
+ollama:
+  enabled: true
+  base_url: http://localhost:11434
+  model: qwen2.5:3b
+  timeout_seconds: 10
+```
+
+Keep Ollama running while the bot is active. It adds a brief explanation
+based only on the model probabilities and filters; it does not change the
+prediction or make trading decisions. If Ollama is unavailable or times out,
+the bot sends the regular Telegram update without AI commentary. No extra
+Python package is required.
+
+## 6. Run the bot
 
 ```powershell
 python train.py
